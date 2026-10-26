@@ -1,0 +1,52 @@
+# Zugangsdaten - niemals ins Repository!
+ETA_Monitor/config.h
+
+# PlatformIO build output
+.pio/
+.pioenvs/
+
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# VS Code (lokale Einstellungen optional ignorieren)
+.vscode/settings.json
+.vscode/launch.json
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# macOS
+.DS_Store
+__MACOSX/
+exports/
+
+# Home Assistant - wird in einem eigenen Projekt gepflegt
+homeassistant/
+gen_homeassistant.py
+
+# Rohdaten aus Scans und Debug-Laeufen
+_*.json
+_*.txt
+
+# Einmalige Patch-Skripte
+fix_ino.py
+patch_dashboard.py
+
+# Nicht veroeffentlichen: Software, Handbuecher und Listen des Herstellers (Urheberrecht),
+# Fremdskripte, lokale Arbeitsdateien
+Etamon2_4/
+Infos/
+Bedienungsanleitung_neu/
+Parameterlister*.pdf
+*.msg
+*.xlsx
+*.pdf
+/*.py
+/*.ps1
+tools/eta_config.ini
+*.bin
+*.elf
