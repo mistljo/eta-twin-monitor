@@ -3,6 +3,7 @@
 Liest die Messwerte eines ETA-Pelletkessels über die RS232-Schnittstelle aus
 und stellt sie als Web-Dashboard (Handy und PC) und JSON-API bereit.
 Einzelne Einstellwerte (z. B. die Einschaltverzögerung) lassen sich begrenzt schreiben.
+Getestet mit einem **ETA Twin** (Stückholzkessel mit Pelletbrenner) und dem **EBYTE ECM50-A06**.
 
 106 Messwerte · Gerät im Netz: `http://<IP-des-Monitors>/` bzw. `http://eta-monitor.local/`
 
@@ -14,6 +15,33 @@ Aktuelle Version und Änderungen: [CHANGELOG.md](CHANGELOG.md)
 > Messungen abgeleitet (siehe Abschnitt 7). Die Nutzung erfolgt **auf eigene Gefahr** –
 > insbesondere das Schreiben von Parametern greift in die Regelung deiner Heizung ein.
 > Es gibt keine Gewährleistung.
+
+---
+
+## Screenshots
+
+Das Dashboard läuft direkt auf dem ESP32 und passt sich Handy und PC an.
+(Die Aufnahmen zeigen Live-Werte einer ETA-Twin-Anlage.)
+
+**PC**
+
+![Anlage](docs/screenshots/dashboard-pc-anlage.png)
+
+| Puffer | Heizkreise |
+|---|---|
+| ![Puffer](docs/screenshots/dashboard-pc-puffer.png) | ![Heizkreise](docs/screenshots/dashboard-pc-heizkreise.png) |
+
+**Kesseldisplay mit Fernbedienung** (gewählte Zeile wird hervorgehoben)
+
+![Display](docs/screenshots/dashboard-pc-display.png)
+
+**Handy**
+
+<p>
+<img src="docs/screenshots/dashboard-handy-anlage.png" width="260" alt="Anlage auf dem Handy">
+<img src="docs/screenshots/dashboard-handy-puffer.png" width="260" alt="Puffer auf dem Handy">
+<img src="docs/screenshots/dashboard-handy-display.png" width="260" alt="Kesseldisplay auf dem Handy">
+</p>
 
 ---
 
@@ -31,6 +59,7 @@ tools/
 ├── merge_scan.py        ← Scan-Ergebnisse zusammenführen und tabellieren
 ├── export_eta_data.py   ← Messwerte als JSON/XML exportieren
 └── eta_config.example.ini
+docs/screenshots/        ← Bilder für dieses README
 CHANGELOG.md             ← Versionshistorie
 ```
 
@@ -49,8 +78,12 @@ CHANGELOG.md             ← Versionshistorie
 
 | Teil | Beschreibung |
 |---|---|
-| eByte ECM50-A06 | ESP32-S3 Modul mit integriertem RS232-Transceiver und Sub-D 9-pol |
-| Sub-D 9-pol Kabel | Verbindung zum ETA-Kessel (nur 3 Adern nötig) |
+| **EBYTE ECM50-A06** | Industrieller Steuerungscomputer mit ESP32-S3 (laut Händlerangabe u. a. RS232, RS485, Modbus RTU, Ethernet, LoRa, 2 DI / 2 AI / 2 DO). Dieses Projekt nutzt nur die RS232-Klemmen A/RX und B/TX und das WLAN. Beispiel-Bezugsquelle (keine Empfehlung): [AliExpress](https://www.aliexpress.com/item/1005010435431832.html) |
+| Kabel zum Kessel | RS232 zum Sub-D-9-Anschluss des ETA-Kessels, nur 3 Adern nötig (TX, RX, GND) |
+
+Auf anderer ESP32-S3-Hardware mit RS232-Pegelwandler läuft die Firmware ebenfalls,
+dazu `ETA_RX_PIN`/`ETA_TX_PIN` in `config.h` anpassen. In `platformio.ini` ist das Board
+`esp32-s3-devkitc-1` eingestellt.
 
 > **Wichtig:** Der ETA-Kessel liefert ±12 V RS232-Pegel, der ESP32 arbeitet mit
 > 3,3 V TTL. Ohne Pegelwandler wird der ESP32 **dauerhaft beschädigt** – das
