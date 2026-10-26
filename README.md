@@ -69,8 +69,7 @@ CHANGELOG.md             ← Versionshistorie
 
 | Teil | Beschreibung |
 |---|---|
-| **EBYTE ECM50-A06** | Industrieller Steuerungscomputer mit ESP32-S3 (laut Händlerangabe u. a. RS232, RS485, Modbus RTU, Ethernet, LoRa, 2 DI / 2 AI / 2 DO). Dieses Projekt nutzt nur die RS232-Klemmen A/RX und B/TX und das WLAN. Beispiel-Bezugsquelle (keine Empfehlung): [AliExpress](https://www.aliexpress.com/item/1005010435431832.html) |
-| Kabel zum Kessel | RS232 zum Sub-D-9-Anschluss des ETA-Kessels, nur 3 Adern nötig (TX, RX, GND) |
+| **EBYTE ECM50-A06** | Industrieller Steuerungscomputer mit ESP32-S3 (laut Händlerangabe u. a. RS232, RS485, Modbus RTU, Ethernet, LoRa, 2 DI / 2 AI / 2 DO). 
 
 Auf anderer ESP32-S3-Hardware mit RS232-Pegelwandler läuft die Firmware ebenfalls,
 dazu `ETA_RX_PIN`/`ETA_TX_PIN` in `config.h` anpassen. In `platformio.ini` ist das Board
