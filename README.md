@@ -63,15 +63,6 @@ docs/screenshots/        ← Bilder für dieses README
 CHANGELOG.md             ← Versionshistorie
 ```
 
-> **Hinweis:** `config.h` ist in `.gitignore` eingetragen und wird nicht ins Repository übertragen,
-> da sie WLAN-Zugangsdaten im Klartext enthält. Vor der ersten Verwendung:
-> ```
-> copy ETA_Monitor\config.example.h ETA_Monitor\config.h
-> ```
-> Dann `config.h` mit eigenen Zugangsdaten befüllen **und alle Passwörter ändern**.
-
----
-
 ## 1. Hardware
 
 ### Benötigte Teile
@@ -117,7 +108,6 @@ Bei dieser Anlage (ETA Twin):
 | **8** | Kesselregelung / Hydraulik | Kessel, Kesselrücklauf, Puffer oben/mitte/unten, Boiler, Pufferladung |
 | **16** | Pelletsteil „PELL.KES“ | Verbrennung, Gebläse, Luftschieber, Restsauerstoff, Zählerstände |
 | **33** | Heizkreis-/Solarmodul | MK1–MK3 Vorlauf/Raum, Kollektor, Außentemperatur, Thermostat |
-| ~~32~~ | **existiert nicht** – antwortet nur mit Index-Echo | – |
 
 ### Eigene Knoten/Indizes ermitteln
 
@@ -405,12 +395,6 @@ Aufzählungswerte dieser Gruppe (`Boiler_Status`, `Puffer_Status`,
 
 Die Solarwerte fehlen, wenn Knoten 33 nicht antwortet.
 
-> **Hinweis für bestehende Anbindungen:** Von FW 2.1.0 auf 2.2.0 wurde kein
-> Schlüssel umbenannt oder entfernt, es kamen nur neue dazu. `blocks` ist
-> jedoch von 4 auf 6 gestiegen – ein vollständiger Umlauf dauert bei
-> `interval=60` jetzt 6 statt 4 Minuten, `age_s` wird entsprechend größer.
-> Eigene Verfügbarkeitsschwellen auf mindestens 420 s anheben oder besser
-> gleich `stale` verwenden, das die Blockzahl bereits berücksichtigt.
 
 ### Aufzählungswerte
 
@@ -669,3 +653,4 @@ Das RS232-Protokoll (Abschnitt 7) wurde mit Hilfe der Beiträge der
 sowie eigener Messungen am Kessel erarbeitet – vielen Dank an alle Beteiligten.
 Herstellerunterlagen (Handbücher, ETAmon-Software, Parameterlisten) sind nicht
 Teil dieses Repositorys.
+Der Code ist KI generiert
