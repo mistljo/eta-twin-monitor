@@ -35,6 +35,8 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ETH.h>
+#include <SPI.h>
 #include <WebServer.h>
 #include <ArduinoOTA.h>
 #include <Update.h>
@@ -244,6 +246,13 @@ static uint32_t s_writeWindowMs   = 0;     // Start des aktuellen 24-h-Fensters
 static uint8_t  s_writeCountDay   = 0;     // Schreibvorgaenge im Fenster
 static uint32_t s_writeCountTotal = 0;     // Schreibvorgaenge seit Start
 
+// Heizkreis-Fernbefehl (tag/nacht) mit Gueltigkeitsdauer: Wird er nicht rechtzeitig
+// erneuert (z. B. Ausfall von Home Assistant), stellt der Monitor selbst auf reset zurueck.
+static uint8_t  s_ovCmd     = 0;           // 0x04 = tag, 0x08 = nacht, 0 = kein Befehl mit Frist aktiv
+static uint32_t s_ovStartMs = 0;           // Start bzw. letzte Erneuerung
+static uint32_t s_ovTtlMs   = 0;           // Gueltigkeitsdauer
+static uint32_t s_ovExpired = 0;           // automatische Rueckstellungen seit Start
+
 // Monitorlisten-Scan (MA/Mb-Protokoll)
 struct MbRow {
     uint8_t knoten, hbyte, lbyte, ueberschrift, datentype;
@@ -378,6 +387,104 @@ static bool s_otaValidMarked   = false;  // Firmware als gültig markiert?
 static bool s_resetFlagCleared = false;  // RTC-Flag nach 5 s gelöscht?
 
 // ============================================================
+//  Netzwerk (Ethernet bevorzugt, WLAN als Rueckfallebene) + LEDs
+// ============================================================
+
+static bool          s_ethUp       = false;  // Ethernet hat eine IP
+static bool          s_bootEth     = false;  // dieser Start laeuft ueber Ethernet
+static unsigned long s_ethUpSinceMs = 0;     // seit wann Ethernet (waehrend WLAN-Betrieb) da ist
+static unsigned long s_ethLostMs   = 0;      // seit wann Ethernet weg (waehrend Ethernet-Betrieb)
+
+static void onNetEvent(arduino_event_id_t ev, arduino_event_info_t) {
+    switch (ev) {
+        case ARDUINO_EVENT_ETH_GOT_IP:
+            s_ethUp = true;
+            break;
+        case ARDUINO_EVENT_ETH_DISCONNECTED:
+        case ARDUINO_EVENT_ETH_STOP:
+            s_ethUp = false;
+            break;
+        default: break;
+    }
+}
+
+static String netIp() {
+    if (s_bootEth) return ETH.localIP().toString();
+    return s_apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
+}
+
+static const char* netKind() {
+    if (s_bootEth) return "eth";
+    return s_apMode ? "ap" : "wifi";
+}
+
+static bool netConnected() {
+    if (s_bootEth) return s_ethUp;
+    return !s_apMode && WiFi.status() == WL_CONNECTED;
+}
+
+// LED "Run" (GPIO21): kurzer Blitz bei jeder Abfrage, laengerer bei jeder Antwort
+// des Kessels, schnelles Blinken wenn der Kessel nicht antwortet.
+// LED "WiFi" (GPIO45) zeigt den Netzwerkstatus: Dauerlicht = verbunden,
+// langsames Blinken = verbinde, schnelles Blinken = Access-Point-Modus.
+static unsigned long s_ledRunUntilMs = 0;
+static bool          s_ledRunFlash   = false;
+
+static inline void ledWrite(int pin, bool on) {
+    digitalWrite(pin, (on == (LED_ACTIVE_HIGH != 0)) ? HIGH : LOW);
+}
+
+static void ledInit() {
+    pinMode(LED_NET_PIN, OUTPUT);
+    pinMode(LED_RUN_PIN, OUTPUT);
+    ledWrite(LED_NET_PIN, false);
+    ledWrite(LED_RUN_PIN, false);
+}
+
+static void ledRunFlash(uint16_t ms) {
+    s_ledRunFlash   = true;
+    s_ledRunUntilMs = millis() + ms;
+    ledWrite(LED_RUN_PIN, true);
+}
+
+static void ledUpdate() {
+    const unsigned long now = millis();
+
+    if (s_safeMode) {                       // Safe Mode: beide LEDs wechselseitig
+        bool a = (now / 250) & 1;
+        ledWrite(LED_NET_PIN, a);
+        ledWrite(LED_RUN_PIN, !a);
+        return;
+    }
+
+    bool net;
+    if (netConnected())  net = true;
+    else if (s_apMode)   net = (now / 125) & 1;
+    else                 net = (now / 500) & 1;
+    ledWrite(LED_NET_PIN, net);
+
+    if (s_ledRunFlash) {
+        if ((long)(now - s_ledRunUntilMs) >= 0) {
+            s_ledRunFlash = false;
+            ledWrite(LED_RUN_PIN, false);
+        }
+        return;
+    }
+    const bool offline = (s_lastDataMs == 0) ? (now > 150000UL)
+                                             : ((now - s_lastDataMs) > 120000UL);
+    ledWrite(LED_RUN_PIN, offline && ((now / 125) & 1));
+}
+
+static void ethStart() {
+    Network.onEvent(onNetEvent);
+    SPI.begin(ETH_SPI_SCK_PIN, ETH_SPI_MISO_PIN, ETH_SPI_MOSI_PIN);
+    ETH.setHostname(OTA_HOSTNAME);
+    if (!ETH.begin(ETH_PHY_W5500, 1, ETH_CS_PIN, ETH_INT_PIN, ETH_RST_PIN, SPI)) {
+        Serial.println("[ETH]  Start fehlgeschlagen - nur WLAN");
+    }
+}
+
+// ============================================================
 //  ETA Protokoll – Senden
 // ============================================================
 
@@ -422,6 +529,7 @@ static void etaSendMonitorConfig() {
 
     s_lastMcSentMs = millis();
     s_awaitingMd   = true;
+    ledRunFlash(30);
     Serial.printf("[ETA] MC Block %d/%d (Node %u): %d Params, Intervall=%u s\n",
                   s_activeBlock + 1, ETA_NUM_BLOCKS, blockNode(s_activeBlock),
                   count, interval);
@@ -732,6 +840,7 @@ static void parseMdPacket(const String& pkt) {
 
     s_lastDataMs = millis();
     s_mdCount++;
+    ledRunFlash(100);
 }
 
 /**
@@ -1074,7 +1183,7 @@ static void etaProcessSerial() {
 
 static String buildDashboard() {
     String html = FPSTR(DASHBOARD_HTML);
-    html.replace("%IP%", s_apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString());
+    html.replace("%IP%", netIp());
     html.replace("%FWVER%", FW_VERSION);
     return html;
 }
@@ -1120,6 +1229,7 @@ static void handleApi() {
     j += ",\"uptime_s\":" + String(now / 1000);
     j += ",\"last_data_s\":" + (s_lastDataMs ? String((now - s_lastDataMs) / 1000) : String(-1));
     j += ",\"fw\":\"" FW_VERSION "\"";
+    j += ",\"net\":\"" + String(netKind()) + "\"";
     j += ",\"interval\":" + String(s_intervalSec);
     j += ",\"block\":" + String(s_activeBlock + 1);
     j += ",\"blocks\":" + String(ETA_NUM_BLOCKS);
@@ -1130,6 +1240,18 @@ static void handleApi() {
     j += ",\"writes\":{\"day\":" + String(writeCountToday()) +
          ",\"max_day\":" + String(WRITE_MAX_PER_DAY) +
          ",\"total\":" + String(s_writeCountTotal) + "}";
+
+    // Heizkreis-Fernbefehl mit Gueltigkeitsdauer
+    j += ",\"override\":{\"cmd\":";
+    if (s_ovCmd) {
+        unsigned long el = now - s_ovStartMs;
+        long left = (el < s_ovTtlMs) ? (long)((s_ovTtlMs - el) / 1000UL) : 0;
+        j += (s_ovCmd == 0x04) ? "\"tag\"" : "\"nacht\"";
+        j += ",\"expires_in_s\":" + String(left);
+    } else {
+        j += "null,\"expires_in_s\":null";
+    }
+    j += ",\"expired_total\":" + String(s_ovExpired) + "}";
 
     // Knoten-Status: welche Module antworten mit echten Werten?
     j += ",\"nodes\":{";
@@ -1160,10 +1282,16 @@ static void handleApi() {
 }
 
 /**
- * POST /cmd?cmd=<befehl>
+ * POST /cmd?cmd=<befehl>[&ttl=<minuten>][&force=1]
  * Sendet einen IH-Steuerbefehl an den Kessel.
  * Befehle: auto | tag | nacht | reset | kessel_ein | kessel_aus | boiler
  * HINWEIS: Kessel muss SMS_erlauben = EIN haben (im Heizkreis konfigurieren)!
+ *
+ * ttl (nur tag/nacht, 1-720 min): Gueltigkeitsdauer. Nach Ablauf ohne Erneuerung sendet
+ *   der Monitor selbst reset (Rueckfall auf das Zeitprogramm des Kessels).
+ *   Wiederholt man denselben Befehl mit ttl, wird nur die Frist verlaengert und nichts an
+ *   den Kessel gesendet; force=1 sendet den Befehl trotzdem erneut.
+ *   Ohne ttl gilt der Befehl bis zum naechsten Befehl (wie bisher).
  */
 static void handleCmd() {
     // Befehle an den Kessel nur mit Anmeldung; bewusst ohne CORS-Freigabe
@@ -1195,12 +1323,41 @@ static void handleCmd() {
         return;
     }
 
-    etaSendHeatingCmd(data0);
+    bool isOverride = (data0 == 0x04 || data0 == 0x08);
+    long ttlMin = s_server.hasArg("ttl") ? s_server.arg("ttl").toInt() : 0;
+    if (ttlMin < 0) ttlMin = 0;
+    if (ttlMin > 720) ttlMin = 720;
+    if (ttlMin > 0 && !isOverride) {
+        s_server.send(400, "application/json", "{\"error\":\"ttl nur bei tag und nacht\"}");
+        return;
+    }
+    bool force   = (s_server.arg("force") == "1");
+    bool renewed = false;
+
+    if (isOverride && ttlMin > 0 && s_ovCmd == data0 && !force) {
+        // Derselbe Befehl ist noch gueltig: nur die Frist verlaengern
+        s_ovStartMs = millis();
+        s_ovTtlMs   = (uint32_t)ttlMin * 60000UL;
+        renewed = true;
+    } else {
+        etaSendHeatingCmd(data0);
+        if (isOverride && ttlMin > 0) {
+            s_ovCmd     = data0;
+            s_ovStartMs = millis();
+            s_ovTtlMs   = (uint32_t)ttlMin * 60000UL;
+        } else {
+            s_ovCmd = 0;   // anderer Befehl oder ohne Frist: keine automatische Rueckstellung
+        }
+    }
     String resp = "{\"ok\":true,\"cmd\":\"";
     resp += cmd;
     resp += "\",\"label\":\"";
     resp += label;
-    resp += "\"}";
+    resp += "\"";
+    if (ttlMin > 0) {
+        resp += ",\"ttl_min\":" + String(ttlMin) + ",\"renewed\":" + String(renewed ? "true" : "false");
+    }
+    resp += "}";
     s_server.send(200, "application/json", resp);
 }
 
@@ -1903,13 +2060,35 @@ void setup() {
         }
     }
 
-    // ---- WiFi verbinden -----------------------------------------
+    // ---- Netzwerk: Ethernet bevorzugt, sonst WLAN ---------------
+    ledInit();
+    ledWrite(LED_NET_PIN, true);
+    ledWrite(LED_RUN_PIN, true);       // Lampentest beim Start
+#if ETH_ENABLE
+    ethStart();
+    Serial.print("[ETH]  Warte auf Link/IP");
+    for (unsigned long t0 = millis(); !s_ethUp && millis() - t0 < ETH_WAIT_MS; ) {
+        ledUpdate();
+        delay(100);
+    }
+    if (s_ethUp) {
+        s_bootEth = true;
+        s_apMode  = false;
+        WiFi.mode(WIFI_OFF);
+        Serial.printf("\n[ETH]  Verbunden! IP: %s\n", ETH.localIP().toString().c_str());
+    } else {
+        Serial.println("\n[ETH]  Kein Link - Rueckfall auf WLAN");
+    }
+#endif
+
+    // ---- WiFi verbinden (nur ohne Ethernet) ---------------------
+    if (!s_bootEth) {
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     Serial.printf("[WiFi] Verbinde mit '%s'", WIFI_SSID);
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < WIFI_CONNECT_TRIES) {
-        delay(500);
+        for (int k = 0; k < 5; k++) { ledUpdate(); delay(100); }
         Serial.print(".");
         attempts++;
     }
@@ -1927,6 +2106,8 @@ void setup() {
         Serial.println("[WiFi] AP-Passwort: siehe config.h (AP_PASS)");
         Serial.printf("[WiFi] AP-IP:       %s\n", WiFi.softAPIP().toString().c_str());
     }
+    }
+    ledUpdate();
 
     // Firmware als gültig markieren → verhindert automatischen OTA-Rollback
     // (wirkt nur, wenn Bootloader mit CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y)
@@ -1972,8 +2153,7 @@ void setup() {
         etaSendMonitorConfig();
     }
 
-    String ip = s_apMode ? WiFi.softAPIP().toString()
-                         : WiFi.localIP().toString();
+    String ip = netIp();
     Serial.println("[OK]   Bereit:");
     Serial.printf("       Dashboard:  http://%s/\n",       ip.c_str());
     Serial.printf("       OTA-Update: http://%s/update  (Benutzer admin, Passwort siehe config.h)\n",
@@ -1996,6 +2176,35 @@ static void wifiWatchdog() {
     const unsigned long now = millis();
     if (now - s_wifiCheckMs < WIFI_CHECK_MS) return;
     s_wifiCheckMs = now;
+
+    // Ethernet-Betrieb: nur den Link ueberwachen. Kommt er nicht zurueck,
+    // startet der Neustart die WLAN-Rueckfallebene.
+    if (s_bootEth) {
+        if (s_ethUp) { s_ethLostMs = 0; return; }
+        if (s_ethLostMs == 0) {
+            s_ethLostMs = now;
+            Serial.println("[ETH]  Verbindung verloren - warte auf Rueckkehr");
+            return;
+        }
+        if (now - s_ethLostMs > ETH_LOST_MS) {
+            Serial.println("[ETH]  Zu lange ohne Verbindung -> Neustart");
+            delay(200);
+            ESP.restart();
+        }
+        return;
+    }
+
+    // WLAN-Betrieb: sobald das Kabel steckt, auf Ethernet wechseln
+    if (s_ethUp) {
+        if (s_ethUpSinceMs == 0) s_ethUpSinceMs = now;
+        else if (now - s_ethUpSinceMs >= ETH_SWITCH_MS) {
+            Serial.println("[ETH]  Kabel erkannt -> Neustart auf Ethernet");
+            delay(200);
+            ESP.restart();
+        }
+    } else {
+        s_ethUpSinceMs = 0;
+    }
 
     if (s_apMode) {
         // Erst nach der Wartezeit erneut suchen - ein Scan blockiert
@@ -2043,7 +2252,8 @@ static void wifiWatchdog() {
 void loop() {
     ArduinoOTA.handle();          // Netzwerk-OTA (Arduino IDE)
     s_server.handleClient();      // Web-Server + Web-OTA
-    wifiWatchdog();               // WLAN-Rueckkehr / Verbindungsverlust
+    wifiWatchdog();               // Netzwerk-Watchdog (Ethernet/WLAN)
+    ledUpdate();                  // Status-LEDs
 
     if (!s_safeMode) {
         etaProcessSerial();
@@ -2056,6 +2266,14 @@ void loop() {
             etaSendDisplayMode(false);
             s_dispOnMs = 0;
             s_dispValid = false;
+        }
+
+        // Fernbefehl mit Gueltigkeitsdauer abgelaufen: zurueck auf das Zeitprogramm des Kessels
+        if (s_ovCmd && (millis() - s_ovStartMs) >= s_ovTtlMs && !s_scanActive && !s_pgActive && !s_txActive) {
+            etaSendHeatingCmd(0x01);
+            s_ovCmd = 0;
+            s_ovExpired++;
+            Serial.println("[CMD] Gueltigkeit des Heizkreis-Befehls abgelaufen - reset gesendet");
         }
 
         // Parameter-Scan: Bleibt eine Antwort aus, wird die Anfrage

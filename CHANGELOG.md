@@ -5,6 +5,38 @@ Versionsnummer = `FW_VERSION` in `config.h`.
 
 ---
 
+## 2.7.0 – 2026-11-05
+
+- **Ethernet** (W5500 des ECM50-A06): Der Monitor nutzt bevorzugt das Netzwerkkabel.
+  Steckt beim Start kein Kabel (kein Link/keine IP binnen `ETH_WAIT_MS`), läuft
+  alles wie bisher über WLAN inklusive Fallback-AP. Wird das Kabel später gesteckt,
+  wechselt das Gerät nach `ETH_SWITCH_MS` per Neustart auf Ethernet. Fällt der Link
+  im Ethernet-Betrieb länger als `ETH_LOST_MS` aus, startet es neu und nutzt das WLAN.
+  Dashboard, API und OTA laufen über beide Wege. `ETH_ENABLE 0` schaltet Ethernet ab.
+- `GET /api` enthält `net` (`eth`, `wifi` oder `ap`).
+- **Status-LEDs** des ECM50-A06: LED „WiFi“ (GPIO45) zeigt den Netzwerkstatus
+  (Dauerlicht = verbunden, langsames Blinken = Verbindungsaufbau, schnelles Blinken
+  = Access-Point). LED „Run“ (GPIO21) blitzt kurz bei jeder Abfrage, länger bei jeder
+  Antwort des Kessels und blinkt schnell, wenn der Kessel nicht antwortet. Im Safe Mode
+    blinken beide abwechselnd. Die LEDs des ECM50-A sind aktiv-low (`LED_ACTIVE_HIGH 0`).
+- Neue Einstellungen in `config.h` (siehe `config.example.h`): `ETH_*`, `LED_*`.
+
+---
+
+## 2.6.0 – 2026-11-04
+
+- `POST /cmd?cmd=tag|nacht&ttl=<Minuten>`: Der Heizkreis-Fernbefehl bekommt eine
+  Gültigkeitsdauer (1–720 min). Wird er nicht erneuert, sendet der Monitor nach
+  Ablauf selbst `reset`; der Kessel fällt auf sein Zeitprogramm zurück. Das
+  schützt vor einem hängenden `nacht`, wenn die steuernde Instanz (z. B. Home
+  Assistant) ausfällt.
+- Derselbe Befehl mit `ttl` verlängert nur die Frist und löst keine neue
+  Kesselmeldung aus; `force=1` sendet ihn erneut. Ohne `ttl` verhält sich
+  `/cmd` wie bisher (Dashboard-Tasten unverändert).
+- `GET /api` enthält `override` (`cmd`, `expires_in_s`, `expired_total`).
+
+---
+
 ## Repository – 2026-10-26
 
 Aufgeräumt für die Veröffentlichung (keine Firmware-Änderung):

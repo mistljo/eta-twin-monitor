@@ -69,7 +69,7 @@ CHANGELOG.md             ← Versionshistorie
 
 | Teil | Beschreibung |
 |---|---|
-| **EBYTE ECM50-A06** | Industrieller Steuerungscomputer mit ESP32-S3 (laut Händlerangabe u. a. RS232, RS485, Modbus RTU, Ethernet, LoRa, 2 DI / 2 AI / 2 DO). 
+| **EBYTE ECM50-A06** | Industrieller Steuerungscomputer mit ESP32-S3 (laut Händlerangabe u. a. RS232, RS485, Modbus RTU, Ethernet, LoRa, 2 DI / 2 AI / 2 DO). Dieses Projekt nutzt die RS232-Klemmen A/RX und B/TX, ab 2.7.0 außerdem Ethernet und die beiden Status-LEDs, daneben weiterhin das WLAN als Rückfallebene. |
 
 Auf anderer ESP32-S3-Hardware mit RS232-Pegelwandler läuft die Firmware ebenfalls,
 dazu `ETA_RX_PIN`/`ETA_TX_PIN` in `config.h` anpassen. In `platformio.ini` ist das Board
@@ -90,6 +90,31 @@ Pin 5  (GND)             -----  GND
 ```
 
 Serielle Parameter: **19200 Baud, 8N1** (UART2).
+
+### Das Gerät: EBYTE ECM50-A
+
+Auf dem Gehäuse steht **ECM50-A** („Industrial Computer“); die Firmware ist auf der
+Variante **ECM50-A06** (ESP32-S3R8, 8 MB PSRAM, 16 MB Flash) entwickelt. Beschriftung
+und Belegung laut Gehäuse und Herstellerdatenblatt:
+
+| Gehäuse-Aufdruck | Funktion |
+|---|---|
+| `DC 8-28V` | Spannungsversorgung (alternativ 5 V über USB-C) |
+| `RS485/232` (A/RX, B/TX, G) | RS232 zum Kessel, hier verwendet (GPIO18 RX, GPIO17 TX) |
+| `DI1`, `DI2` / `AI1`, `AI2` | 2 Digitaleingänge / 2 Analogeingänge (4–20 mA), nicht verwendet |
+| `RELAY1`, `RELAY2` | 2 Relais, nicht verwendet |
+| `Wi-Fi ANT`, `4G/LoRa ANT` | Antennenanschlüsse (4G/LoRa nicht verwendet) |
+| `Ethernet` | RJ45, 10/100 MBit (W5500), ab 2.7.0 verwendet |
+| `DEBUG` | Debug-/Programmierschnittstelle (UART0), serieller Monitor und Erstflash |
+| `RST`, `TF`, `SIM` | Reset-Taster, TF-Kartenleser, SIM-Fach (nicht verwendet) |
+
+| LED | Bedeutung |
+|---|---|
+| `PWR` | Spannungsversorgung |
+| `ETH` | Ethernet-Link/Aktivität (vom Ethernet-Chip gesteuert) |
+| `RUN` | programmierbar (GPIO21), von der Firmware ab 2.7.0 als Abfrage-/Antwortanzeige genutzt |
+| `WIFI` | programmierbar (GPIO45), von der Firmware ab 2.7.0 als Netzwerkstatus genutzt |
+| `4G/LORA` | nicht verwendet |
 
 ---
 
@@ -159,6 +184,21 @@ Falls kein WLAN erreichbar ist, spannt der ESP32 automatisch einen
 - Passwort: `AP_PASS` aus `config.h`
 - URL: `http://192.168.4.1/`
 
+### Ethernet und Status-LEDs (ab 2.7.0)
+
+Das ECM50-A06 hat einen W5500-Ethernet-Chip (SPI: CS 47, SCLK 12, MISO 13, MOSI 11,
+INT 14, RST 48). Die Firmware nutzt bevorzugt das Netzwerkkabel; das WLAN bleibt als
+Rückfallebene. Zeiten und Pins stehen in `config.h` (`ETH_*`), `ETH_ENABLE 0` schaltet
+Ethernet ab. Im Ethernet-Betrieb ist das WLAN aus. `GET /api` zeigt den aktiven Weg im
+Feld `net` (`eth`, `wifi`, `ap`).
+
+| LED | GPIO | Bedeutung |
+|---|---|---|
+| WiFi | 45 | Dauerlicht = Netzwerk verbunden (Ethernet oder WLAN), langsames Blinken = Verbindungsaufbau, schnelles Blinken = Access-Point |
+| Run | 21 | kurzer Blitz = Abfrage an den Kessel, längerer Blitz = Antwort des Kessels, schnelles Blinken = Kessel antwortet nicht |
+
+Beim ECM50-A leuchten die LEDs bei LOW (`LED_ACTIVE_HIGH 0`, Standard). Bei anderer Hardware ggf. `LED_ACTIVE_HIGH 1` setzen.
+
 ---
 
 ## 4. Bauen & Hochladen (PlatformIO)
@@ -205,7 +245,7 @@ Erstinbetriebnahme per USB, danach nur noch über WLAN.
 | `/display` | GET | Aktuelle Anzeige als JSON (`lines`, `text`, `status`, `raw`, `age_ms`) |
 | `/display?on=1` \| `?on=0` | GET/POST | Spiegelung der Kesselanzeige ein-/ausschalten (ohne Anmeldung, harmlos) |
 | `/display?key=<taste>` | POST | Tastendruck senden (`aendern`, `ja`, `auf`, `ab`, `zurueck`, `info`, `kessel`, `entaschen` oder `0`–`7`) – **Anmeldung + Header `X-ETA`** |
-| `/cmd` | POST | Steuerbefehl: `?cmd=reset` \| `auto` \| `tag` \| `nacht` \| `kessel_ein` \| `kessel_aus` \| `boiler` – **Anmeldung + Header `X-ETA`** |
+| `/cmd` | POST | Steuerbefehl: `?cmd=reset` \| `auto` \| `tag` \| `nacht` \| `kessel_ein` \| `kessel_aus` \| `boiler`; bei `tag`/`nacht` optional `&ttl=<Minuten>` (siehe unten) – **Anmeldung + Header `X-ETA`** |
 | `/set` | GET | Freigabeliste der schreibbaren Einstellwerte, Limits und Zähler (nur lesend) |
 | `/set?name=<Parameter>&val=<Zahl>` | POST | Einstellwert im Kessel setzen (`{MJ}`), siehe Abschnitt „Schreiben von Einstellwerten“ – **Anmeldung + Header `X-ETA`** |
 | `/update` | GET/POST | Web-OTA (unzuverlässig, siehe oben) |
@@ -213,6 +253,32 @@ Erstinbetriebnahme per USB, danach nur noch über WLAN.
 **Anmeldung für ändernde Aufrufe:** Benutzer `admin`, Passwort `OTA_PASS` aus
 `config.h` (HTTP Basic) und der Header `X-ETA: 1`. Der Header schützt vor
 Aufrufen aus fremden Webseiten. Lesende Aufrufe bleiben ohne Anmeldung.
+
+### Heizkreis-Fernbefehl mit Gültigkeitsdauer (`/cmd?cmd=tag|nacht&ttl=…`)
+
+`tag` und `nacht` überschreiben die Betriebsart der Heizkreise (die Funktion
+der SMS-Fernbedienung; am Kessel muss „SMS erlauben“ auf JA stehen).
+Der Befehl bleibt im Kessel, bis er gelöscht wird. Damit ein Ausfall der
+übergeordneten Steuerung (z. B. Home Assistant) den Kessel nicht dauerhaft in
+einer Betriebsart festhält, kann man eine **Gültigkeitsdauer** mitgeben:
+
+- `ttl` in Minuten (1–720). Läuft sie ab, ohne dass der Befehl erneuert wurde,
+  sendet der Monitor selbst `reset` (Rückfall auf das Zeitprogramm des Kessels).
+- Derselbe Befehl mit `ttl` verlängert nur die Frist und sendet nichts an den
+  Kessel. `force=1` sendet ihn trotzdem erneut (z. B. wenn der Kessel den Zustand
+  verloren hat).
+- `reset` (oder ein anderer Befehl) beendet die Frist. Zum Zurückgeben der
+  Kontrolle `reset` verwenden, nicht `auto`.
+- `GET /api` enthält `override` mit `cmd`, `expires_in_s` und `expired_total`.
+- Die Frist liegt nur im Arbeitsspeicher des Monitors. Nach einem Neustart des
+  Monitors läuft sie nicht mehr; ein im Kessel gesetzter Befehl bleibt dann bis
+  zum nächsten `reset` bestehen. Als Notausstieg am Kessel genügt es laut
+  Handbuch, den Betriebsartwähler am Raumfühler kurz zu verstellen.
+
+```powershell
+Invoke-RestMethod -Method Post -Headers @{ 'X-ETA' = '1' } -Credential $cred `
+    -Uri 'http://<IP-des-Monitors>/cmd?cmd=nacht&ttl=180' -AllowUnencryptedAuthentication
+```
 
 ### Schreiben von Einstellwerten (`/set`)
 

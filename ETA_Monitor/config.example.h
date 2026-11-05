@@ -25,6 +25,34 @@
 #define WIFI_AP_RETRY_MS    120000UL    // im AP-Modus alle 2 min erneut suchen
 #define WIFI_STA_LOST_MS    600000UL    // 10 min ohne Verbindung -> Neustart
 
+// ------ Ethernet (W5500, ECM50-A06) ------------------------
+// Ethernet wird bevorzugt, WLAN dient als Rueckfallebene: Steckt beim Start
+// kein Kabel (kein Link/keine IP binnen ETH_WAIT_MS), laeuft alles ueber WLAN.
+// Wird das Kabel spaeter gesteckt, wechselt das Geraet nach ETH_SWITCH_MS per
+// Neustart auf Ethernet. Faellt der Link im Ethernet-Betrieb laenger als
+// ETH_LOST_MS aus, startet es neu und nutzt dann das WLAN.
+// Pins laut Hersteller-Pinbelegung ECM50-A (Ethernet = SPI1 + CS/INT/RST).
+#define ETH_ENABLE        1             // 0 = nur WLAN
+#define ETH_CS_PIN        47
+#define ETH_INT_PIN       14
+#define ETH_RST_PIN       48
+#define ETH_SPI_SCK_PIN   12
+#define ETH_SPI_MISO_PIN  13
+#define ETH_SPI_MOSI_PIN  11
+#define ETH_WAIT_MS       8000UL        // Wartezeit auf Ethernet beim Start
+#define ETH_SWITCH_MS     10000UL       // Kabel im WLAN-Betrieb erkannt -> Wechsel
+#define ETH_LOST_MS       180000UL      // 3 min kein Link -> Neustart (WLAN)
+
+// ------ Status-LEDs ----------------------------------------
+// LED "WiFi" = Netzwerkstatus (Dauerlicht verbunden, langsam blinkend = suche,
+// schnell blinkend = Access-Point). LED "Run" = Blitz bei jeder Abfrage/Antwort
+// des Kessels, schnelles Blinken wenn der Kessel nicht antwortet.
+// LED_ACTIVE_HIGH 0: die LEDs des ECM50-A leuchten bei LOW (aktiv-low).
+// Bei anderer Hardware mit aktiv-high LEDs auf 1 setzen.
+#define LED_NET_PIN       45
+#define LED_RUN_PIN       21
+#define LED_ACTIVE_HIGH   0
+
 // ------ ETA RS232 ------------------------------------------
 // Pins des UART2 am ESP32 (ggf. ans ECM50-A Pinlayout anpassen)
 // Falls das ECM50-A einen eigenen RS232-Port hat, hier die
@@ -68,4 +96,4 @@
 // mDNS-Hostname (erscheint als Netzwerk-Port in der Arduino IDE)
 #define OTA_HOSTNAME  "eta-monitor"
 // Firmware-Version (im Dashboard + auf der Update-Seite)
-#define FW_VERSION    "2.5.0"
+#define FW_VERSION    "2.7.0"
